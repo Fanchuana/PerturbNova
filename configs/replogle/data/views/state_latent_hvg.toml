@@ -1,0 +1,17 @@
+[data]
+use_hvg = false
+hvg_key = "highly_variable"
+
+[data.feature_space]
+source = "obsm"
+key = "X_hvg"
+
+[data.obs_keys]
+perturbation = "gene"
+batch = "gem_group"
+cell_type = "cell_line"
+
+[data.control]
+enabled = false
+label = "non-targeting"
+samples_per_query = 32

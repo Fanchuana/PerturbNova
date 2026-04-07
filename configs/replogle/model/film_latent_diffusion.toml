@@ -1,0 +1,29 @@
+[model]
+name = "film_mlp"
+hidden_dim = 2048
+num_layers = 3
+time_embed_dim = 2048
+dropout = 0.0
+use_encoder = true
+use_batch_embeddings = false
+control_attention_heads = 4
+perturbation_dropout = 0.15
+
+[diffusion]
+steps = 1000
+learn_sigma = false
+noise_schedule = "linear"
+timestep_respacing = ""
+use_kl = false
+predict_xstart = false
+rescale_timesteps = false
+rescale_learned_sigmas = false
+
+[vae]
+enabled = true
+latent_dim = 128
+seed = 0
+loss_ae = "mse"
+decoder_activation = "ReLU"
+decode_predictions = true
+batch_size = 512

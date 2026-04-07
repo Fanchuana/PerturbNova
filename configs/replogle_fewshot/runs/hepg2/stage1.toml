@@ -1,0 +1,5 @@
+base_configs = ["../../../replogle/common/base.toml", "../../../replogle/data/source/fewshot_hepg2.toml", "../../../replogle/data/views/state_latent_hvg.toml", "../../../replogle/model/film_latent_diffusion.toml", "../../../replogle/training/stage1.toml"]
+
+[experiment]
+name = "replogle_fewshot_hepg2_stage1"
+output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_fewshot/hepg2/stage1"

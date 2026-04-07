@@ -1,0 +1,27 @@
+# Shared training defaults used by all Replogle stages.
+
+[optimization]
+# Shared AdamW learning rate.
+lr = 0.0001
+# Shared AdamW weight decay.
+weight_decay = 0.0
+# Enable AMP mixed precision.
+amp = false
+# Number of dataloader workers per rank.
+num_workers = 4
+# Pin host memory for faster host-to-device transfer.
+pin_memory = true
+# Keep dataloader workers alive between epochs.
+persistent_workers = true
+# Global gradient clipping threshold.
+gradient_clip_norm = 1.0
+
+[checkpoint]
+# Resume the current stage from a checkpoint file or from an output directory.
+resume_path = ""
+
+[evaluation]
+# Enable periodic validation for the current stage.
+enabled = true
+# Number of batches to use during each validation run.
+num_batches = 1

@@ -1,0 +1,37 @@
+base_configs = ["./base.toml"]
+
+[training]
+# Stage selector consumed by config normalization.
+stage = "stage2"
+
+[optimization]
+# Per-rank diffusion batch size.
+batch_size = 64
+# Per-rank microbatch size for diffusion training.
+microbatch_size = 64
+# Number of optimizer updates for stage2.
+max_steps = 100000
+# Linear LR decay horizon for stage2. Usually match max_steps.
+lr_anneal_steps = 100000
+# EMA decay rates to save for inference.
+ema_rates = [0.9999]
+# Timestep sampler used by the diffusion objective.
+schedule_sampler = "uniform"
+# How often to print diffusion training metrics.
+log_every_steps = 100
+# How often to save stage2 diffusion checkpoints.
+save_every_steps = 5000
+
+[vae]
+# Stage2 consumes a stage1 VAE checkpoint; run configs usually fill this path.
+checkpoint_path = ""
+# Keep the VAE frozen in the standard stage2 template.
+freeze = true
+
+[evaluation]
+# How often to run sampling-based diffusion validation.
+every_steps = 5000
+# Sampling method used during validation.
+sampling_method = "ddim"
+# CFG scale used during validation sampling.
+cfg_scale = 1.0

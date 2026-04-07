@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "perturbnova"
+version = "0.1.0"
+description = "A refactored diffusion training and inference stack for single-cell perturbation prediction."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.1",
+  "anndata>=0.10",
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "tqdm>=4.66",
+  "tomli>=2.0; python_version<'3.11'",
+]
+
+[project.scripts]
+perturbnova-train = "perturbnova.cli.train:main"
+perturbnova-infer = "perturbnova.cli.infer:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

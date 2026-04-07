@@ -1,0 +1,18 @@
+base_configs = ["../base.toml"]
+
+[experiment]
+name = "replogle_zeroshot_rpe1_infer"
+output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/rpe1/infer"
+
+[checkpoint]
+# Replace <final_diffusion_stage> with stage2 or stage2_unfrozen_vae.
+path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/rpe1/<final_diffusion_stage>/checkpoints/latest.pt"
+
+[input.split]
+dataset_config_path = "../../../replogle/data/source/zeroshot_rpe1.toml"
+
+[output]
+prediction_path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/rpe1/infer/predictions.h5ad"
+
+[cell_eval]
+outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/rpe1/infer/cell_eval"

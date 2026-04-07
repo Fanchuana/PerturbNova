@@ -1,0 +1,31 @@
+base_configs = ["./base.toml"]
+
+[training]
+# Stage selector consumed by config normalization.
+stage = "stage1"
+
+[optimization]
+# Per-rank VAE batch size. Global batch size = batch_size x world_size.
+batch_size = 128
+# Per-rank microbatch size. Keep equal to batch_size to disable gradient accumulation.
+microbatch_size = 128
+# Number of optimizer updates for stage1.
+max_steps = 200000
+# Linear LR decay horizon for stage1. Usually match max_steps.
+lr_anneal_steps = 200000
+# How often to print VAE training metrics.
+log_every_steps = 1000
+# How often to save stage1 VAE checkpoints.
+save_every_steps = 50000
+
+[vae]
+# Optional full VAE checkpoint to continue stage1 or reuse an existing autoencoder.
+checkpoint_path = ""
+# Optional SCimilarity directory used to initialize encoder/decoder weights for stage1.
+pretrained_state_dir = "/work/home/cryoem666/xyf/temp/pycharm/scimilarity/file"
+# Stage1 must keep the VAE trainable.
+freeze = false
+
+[evaluation]
+# How often to run stage1 reconstruction validation.
+every_steps = 5000

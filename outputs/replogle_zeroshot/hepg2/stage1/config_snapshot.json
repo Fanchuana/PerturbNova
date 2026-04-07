@@ -1,0 +1,114 @@
+{
+  "experiment": {
+    "name": "replogle_zeroshot_hepg2_stage1",
+    "output_dir": "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/stage1",
+    "seed": 42,
+    "log_render": "rich",
+    "log_progress_width": 28
+  },
+  "distributed": {
+    "backend": "nccl",
+    "find_unused_parameters": false
+  },
+  "training": {
+    "stage": "stage1",
+    "unfreeze_vae_in_stage2": false,
+    "mode": "vae_only"
+  },
+  "dataset": {
+    "name": "state_perturbation",
+    "data_path": "/work/home/cryoem666/czx/dataset/STATE/arcinstitute-State-Replogle-Filtered-Dec-6-2025/replogle_concat.h5ad",
+    "use_hvg": false,
+    "hvg_key": "highly_variable",
+    "feature_space": {
+      "source": "obsm",
+      "key": "X_hvg"
+    },
+    "obs_keys": {
+      "perturbation": "gene",
+      "batch": "gem_group",
+      "cell_type": "cell_line"
+    },
+    "split": {
+      "mode": "zeroshot_holdout",
+      "target_cell_type": "hepg2",
+      "val_perturbations": [],
+      "test_perturbations": [],
+      "zeroshot_role": "test"
+    },
+    "control": {
+      "enabled": false,
+      "label": "non-targeting",
+      "samples_per_query": 32
+    },
+    "source_name": "replogle",
+    "dataset_name": "replogle"
+  },
+  "model": {
+    "name": "film_mlp",
+    "hidden_dim": 2048,
+    "num_layers": 3,
+    "time_embed_dim": 2048,
+    "dropout": 0.0,
+    "use_encoder": true,
+    "use_batch_embeddings": false,
+    "control_attention_heads": 4,
+    "perturbation_dropout": 0.15
+  },
+  "diffusion": {
+    "steps": 1000,
+    "learn_sigma": false,
+    "noise_schedule": "linear",
+    "timestep_respacing": "",
+    "use_kl": false,
+    "predict_xstart": false,
+    "rescale_timesteps": false,
+    "rescale_learned_sigmas": false
+  },
+  "optimization": {
+    "batch_size": 128,
+    "microbatch_size": 128,
+    "max_steps": 200000,
+    "lr": 0.0001,
+    "weight_decay": 0.0,
+    "lr_anneal_steps": 200000,
+    "ema_rates": [
+      0.9999
+    ],
+    "schedule_sampler": "uniform",
+    "amp": false,
+    "num_workers": 4,
+    "pin_memory": true,
+    "persistent_workers": true,
+    "gradient_clip_norm": 1.0,
+    "log_every_steps": 1000,
+    "save_every_steps": 50000
+  },
+  "checkpoint": {
+    "resume_path": ""
+  },
+  "vae": {
+    "enabled": true,
+    "checkpoint_path": "",
+    "pretrained_state_dir": "/work/home/cryoem666/xyf/temp/pycharm/scimilarity/file",
+    "latent_dim": 128,
+    "freeze": false,
+    "seed": 0,
+    "loss_ae": "mse",
+    "decoder_activation": "ReLU",
+    "reconstruction_loss_weight": 0.0,
+    "decode_predictions": true,
+    "batch_size": 512
+  },
+  "evaluation": {
+    "enabled": true,
+    "every_steps": 5000,
+    "num_batches": 1,
+    "sampling_method": "ddim",
+    "cfg_scale": 1.0
+  },
+  "raw_state_training": {
+    "replogle": "train"
+  },
+  "task": "state_perturbation"
+}

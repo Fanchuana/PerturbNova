@@ -1,0 +1,80 @@
+[experiment]
+name = "replogle_fewshot_infer"
+output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_fewshot/default_infer"
+seed = 42
+
+[distributed]
+backend = "nccl"
+
+[checkpoint]
+path = ""
+ema_rate = 0.9999
+
+[input]
+data_path = ""
+reference_data_path = ""
+
+[input.split]
+subset = "test"
+dataset_config_path = ""
+
+[input.obs_keys]
+perturbation = "gene"
+batch = "gem_group"
+cell_type = "cell_line"
+
+[input.defaults]
+perturbation = "non-targeting"
+batch = ""
+cell_type = ""
+
+[control]
+enabled = false
+label = "non-targeting"
+samples_per_query = 32
+
+[sampling]
+batch_size = 128
+num_workers = 4
+pin_memory = true
+persistent_workers = true
+method = "ddim"
+cfg_scale = 1.0
+clip_denoised = false
+eta = 0.0
+progress = true
+
+[output]
+write_to = "obsm"
+key = "X_perturbnova"
+prediction_path = ""
+real_copy_path = ""
+store_latent_key = ""
+clamp_min = 0.0
+clamp_max = 10.0
+
+[decode]
+enabled = false
+callable = ""
+checkpoint_path = ""
+state_dict_key = ""
+call_method = "__call__"
+batch_size = 512
+
+[decode.kwargs]
+
+[decode.call_kwargs]
+
+[cell_eval]
+enabled = true
+outdir = ""
+profile = "anndata"
+pert_col = "gene"
+celltype_col = "cell_line"
+control_pert = "non-targeting"
+embed_key = ""
+num_threads = 1
+batch_size = 100
+de_method = "wilcoxon"
+skip_metrics = ""
+allow_discrete = false
