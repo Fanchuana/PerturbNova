@@ -6,13 +6,18 @@ output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle
 
 [checkpoint]
 # Replace <final_diffusion_stage> with stage2 or stage2_unfrozen_vae.
-path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/<final_diffusion_stage>/checkpoints/latest.pt"
+path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/stage2_batch_1024/checkpoints/latest.pt"
+use_ema = false
 
 [input.split]
 dataset_config_path = "../../../replogle/data/source/zeroshot_hepg2.toml"
 
 [output]
-prediction_path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/infer/predictions.h5ad"
+prediction_path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/infer_batch_1024/predictions.h5ad"
 
 [cell_eval]
-outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/infer/cell_eval"
+outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/infer_batch_1024/cell_eval"
+
+
+[diffusion]
+timestep_respacing = "ddim50"

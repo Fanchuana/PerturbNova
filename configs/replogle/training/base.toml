@@ -20,6 +20,20 @@ gradient_clip_norm = 1.0
 # Resume the current stage from a checkpoint file or from an output directory.
 resume_path = ""
 
+[objective]
+# How control samples are used: none, input_only, loss_only, or input_and_loss.
+control_usage = "input_only"
+
+[objective.loss_weights]
+# Weight of the original diffusion denoising objective.
+diffusion_mse = 1.0
+# Weight of the predicted x_start reconstruction objective.
+xstart_mse = 0.0
+# Weight of the batch-level perturbation-effect alignment loss.
+effect_batch_mse = 0.0
+# Weight of the control-anchored perturbation-effect cosine loss.
+effect_cosine = 0.0
+
 [evaluation]
 # Enable periodic validation for the current stage.
 enabled = true

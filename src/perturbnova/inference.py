@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+from copy import deepcopy
 from pathlib import Path
 
 import anndata as ad
@@ -81,6 +82,9 @@ class DiffusionInferenceRunner:
         self.payload = load_checkpoint_payload(config["checkpoint"]["path"], map_location="cpu")
         self.train_config = self.payload["config"]
         self.artifacts = StateDataArtifacts.from_dict(self.payload["dataset_artifacts"])
+        objective_config = self.train_config.get("objective", {})
+        self.control_usage = str(objective_config.get("control_usage", "input_only"))
+        self.use_control_input = self.control_usage in {"input_only", "input_and_loss"}
         self.vae = build_vae_module(
             self.train_config.get("vae", {"enabled": False}),
             input_dim=self.artifacts.raw_feature_dim,
@@ -90,11 +94,17 @@ class DiffusionInferenceRunner:
             self.vae.load_state_dict(self.payload["vae"])
             self.vae.eval()
         self.model = build_model(self.train_config["model"], self.artifacts.to_dict()).to(self.context.device)
-        self.model.load_state_dict(
+        use_ema = bool(config["checkpoint"].get("use_ema", True))
+        state_dict = (
             select_state_dict_for_inference(self.payload, config["checkpoint"]["ema_rate"])
+            if use_ema
+            else self.payload["model"]
         )
+        self.model.load_state_dict(state_dict)
         self.model.eval()
-        self.diffusion = build_diffusion(self.train_config["diffusion"])
+        diffusion_config = deepcopy(self.train_config["diffusion"])
+        diffusion_config.update(self.config.get("diffusion", {}))
+        self.diffusion = build_diffusion(diffusion_config)
         self.decoder = DecoderAdapter(config["decode"], self.context.device)
 
         if self.context.is_main_process:
@@ -214,6 +224,8 @@ class DiffusionInferenceRunner:
                             self.vae,
                             model_kwargs["control_set"].reshape(-1, feature_dim),
                         ).reshape(batch_size, control_count, -1)
+                if not self.use_control_input:
+                    model_kwargs["control_set"] = None
 
                 sample_kwargs = {
                     "model": self.model,

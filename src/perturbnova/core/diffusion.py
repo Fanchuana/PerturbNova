@@ -188,7 +188,7 @@ class GaussianDiffusion:
                 x_start_prediction = denoised_fn(x_start_prediction)
             if clip_denoised:
                 return x_start_prediction.clamp(-1, 1)
-            return x_start_prediction.clamp(0)
+            return x_start_prediction
 
         pred_xstart = process_xstart(self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output))
         model_mean, _, _ = self.q_posterior_mean_variance(x_start=pred_xstart, x_t=x, t=t)
@@ -207,6 +207,13 @@ class GaussianDiffusion:
             _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
             - _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape) * eps
         )
+
+    def _predict_xstart_from_xprev(self, x_t, t, xprev):
+        assert x_t.shape == xprev.shape
+        return (
+            xprev
+            - _extract_into_tensor(self.posterior_mean_coef2, t, x_t.shape) * x_t
+        ) / _extract_into_tensor(self.posterior_mean_coef1, t, x_t.shape)
 
     def _predict_eps_from_xstart(self, x_t, t, pred_xstart):
         return (
@@ -484,14 +491,17 @@ class GaussianDiffusion:
         terms = {}
 
         if self.loss_type in {LossType.KL, LossType.RESCALED_KL}:
-            terms["loss"] = self._vb_terms_bpd(
+            vb_terms = self._vb_terms_bpd(
                 model=model,
                 x_start=x_start,
                 x_t=x_t,
                 t=t,
                 clip_denoised=False,
                 model_kwargs=model_kwargs,
-            )["output"]
+            )
+            terms["loss"] = vb_terms["output"]
+            terms["pred_xstart"] = vb_terms["pred_xstart"]
+            terms["xstart_mse"] = mean_flat((x_start - vb_terms["pred_xstart"]) ** 2)
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
             return terms
@@ -519,6 +529,13 @@ class GaussianDiffusion:
             ModelMeanType.EPSILON: noise,
         }[self.model_mean_type]
         assert model_output.shape == target.shape == x_start.shape
+        pred_xstart = {
+            ModelMeanType.PREVIOUS_X: self._predict_xstart_from_xprev(x_t=x_t, t=t, xprev=model_output),
+            ModelMeanType.START_X: model_output,
+            ModelMeanType.EPSILON: self._predict_xstart_from_eps(x_t=x_t, t=t, eps=model_output),
+        }[self.model_mean_type]
+        terms["pred_xstart"] = pred_xstart
+        terms["xstart_mse"] = mean_flat((x_start - pred_xstart) ** 2)
         terms["mse"] = mean_flat((target - model_output) ** 2)
         terms["loss"] = terms["mse"] + terms.get("vb", 0)
         return terms

@@ -7,8 +7,7 @@ seed = 42
 backend = "nccl"
 
 [checkpoint]
-path = ""
-ema_rate = 0.9999
+use_ema = false
 
 [input]
 data_path = ""
@@ -68,13 +67,13 @@ batch_size = 512
 [cell_eval]
 enabled = true
 outdir = ""
-profile = "anndata"
+profile = "full"
 pert_col = "gene"
 celltype_col = "cell_line"
 control_pert = "non-targeting"
 embed_key = ""
-num_threads = 1
-batch_size = 100
+num_threads = 128
+batch_size = 256
 de_method = "wilcoxon"
-skip_metrics = ""
+skip_metrics = "pearson_edistance,clustering_agreement"
 allow_discrete = false

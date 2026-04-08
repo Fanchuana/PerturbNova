@@ -91,6 +91,15 @@ DEFAULT_TRAIN_CONFIG: dict[str, Any] = {
         "log_every_steps": 100,
         "save_every_steps": 1000,
     },
+    "objective": {
+        "control_usage": "input_only",
+        "loss_weights": {
+            "diffusion_mse": 1.0,
+            "xstart_mse": 0.0,
+            "effect_batch_mse": 0.0,
+            "effect_cosine": 0.0,
+        },
+    },
     "checkpoint": {
         "resume_path": "",
     },
@@ -131,6 +140,7 @@ DEFAULT_INFER_CONFIG: dict[str, Any] = {
     "checkpoint": {
         "path": "",
         "ema_rate": 0.9999,
+        "use_ema": True,
     },
     "input": {
         "data_path": "",
@@ -166,6 +176,7 @@ DEFAULT_INFER_CONFIG: dict[str, Any] = {
         "eta": 0.0,
         "progress": True,
     },
+    "diffusion": {},
     "output": {
         "write_to": "obsm",
         "key": "X_perturbnova",
@@ -188,7 +199,7 @@ DEFAULT_INFER_CONFIG: dict[str, Any] = {
     "cell_eval": {
         "enabled": False,
         "outdir": "",
-        "profile": "anndata",
+        "profile": "full",
         "pert_col": "",
         "celltype_col": "",
         "control_pert": "",
@@ -228,7 +239,10 @@ def load_train_config(path: str | Path) -> dict[str, Any]:
 
 
 def load_infer_config(path: str | Path) -> dict[str, Any]:
+    path = Path(path).resolve()
     config = _deep_merge(DEFAULT_INFER_CONFIG, _load_toml_with_bases(path))
+    config = _normalize_infer_paths(config, path.parent)
+    config = _normalize_infer_config(config)
     _validate_infer_config(config)
     return config
 
@@ -271,6 +285,16 @@ def _load_toml_with_bases(
 def _validate_train_config(config: dict[str, Any]) -> None:
     if config["experiment"]["log_render"] not in {"compact", "rich"}:
         raise ValueError("`experiment.log_render` must be `compact` or `rich`.")
+    if config["objective"]["control_usage"] not in {"none", "input_only", "loss_only", "input_and_loss"}:
+        raise ValueError(
+            "`objective.control_usage` must be one of `none`, `input_only`, `loss_only`, or `input_and_loss`."
+        )
+    loss_weights = config["objective"]["loss_weights"]
+    if float(loss_weights.get("diffusion_mse", 1.0)) <= 0:
+        raise ValueError("`objective.loss_weights.diffusion_mse` must be positive.")
+    for key, value in loss_weights.items():
+        if float(value) < 0:
+            raise ValueError(f"`objective.loss_weights.{key}` must be non-negative.")
     if not config["dataset"]["data_path"]:
         raise ValueError("`dataset.data_path` is required.")
     if config["dataset"]["name"] != "state_perturbation":
@@ -301,11 +325,31 @@ def _validate_infer_config(config: dict[str, Any]) -> None:
         )
 
 
+def _normalize_infer_config(config: dict[str, Any]) -> dict[str, Any]:
+    config = deepcopy(config)
+    cell_eval = config.setdefault("cell_eval", {})
+    profile = str(cell_eval.get("profile", "")).strip().lower()
+    if profile == "squidiff":
+        cell_eval["profile"] = "full"
+    return config
+
+
 def _normalize_train_config(config: dict[str, Any]) -> dict[str, Any]:
     config = deepcopy(config)
 
     training = config.setdefault("training", {})
     vae = config.setdefault("vae", {})
+    objective = config.setdefault("objective", {})
+    loss_weights = objective.setdefault("loss_weights", {})
+
+    legacy_loss_keys = {
+        "xstart_mse_weight": "xstart_mse",
+        "effect_mse_weight": "effect_batch_mse",
+        "effect_cosine_weight": "effect_cosine",
+    }
+    for legacy_key, target_key in legacy_loss_keys.items():
+        if legacy_key in objective:
+            loss_weights[target_key] = objective.pop(legacy_key)
 
     stage = training.get("stage", "")
     if stage == "stage1":
@@ -315,6 +359,17 @@ def _normalize_train_config(config: dict[str, Any]) -> dict[str, Any]:
         training["mode"] = "joint" if training.get("unfreeze_vae_in_stage2", False) else "diffusion_only"
         vae["freeze"] = not training.get("unfreeze_vae_in_stage2", False)
 
+    return config
+
+
+def _normalize_infer_paths(config: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+    config = deepcopy(config)
+    split_config = config.setdefault("input", {}).setdefault("split", {})
+    dataset_config_path = split_config.get("dataset_config_path", "")
+    if dataset_config_path:
+        candidate = Path(dataset_config_path)
+        if not candidate.is_absolute():
+            split_config["dataset_config_path"] = str((base_dir / candidate).resolve())
     return config
 
 

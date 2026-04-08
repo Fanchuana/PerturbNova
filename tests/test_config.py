@@ -155,6 +155,33 @@ class TrainConfigTests(unittest.TestCase):
             self.assertEqual(config["training"]["mode"], "joint")
             self.assertFalse(config["vae"]["freeze"])
 
+    def test_objective_loss_weights_normalize_and_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "run.toml").write_text(
+                '\n'.join(
+                    [
+                        "[dataset]",
+                        'data_path = "/tmp/replogle_subset.h5ad"',
+                        "",
+                        "[objective]",
+                        'control_usage = "loss_only"',
+                        "xstart_mse_weight = 0.1",
+                        "",
+                        "[objective.loss_weights]",
+                        "effect_batch_mse = 0.2",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_train_config(root / "run.toml")
+
+            self.assertEqual(config["objective"]["control_usage"], "loss_only")
+            self.assertEqual(config["objective"]["loss_weights"]["diffusion_mse"], 1.0)
+            self.assertEqual(config["objective"]["loss_weights"]["xstart_mse"], 0.1)
+            self.assertEqual(config["objective"]["loss_weights"]["effect_batch_mse"], 0.2)
+
     def test_all_replogle_stage_run_configs_load(self) -> None:
         roots = [
             Path("/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/configs/replogle_fewshot/runs"),
@@ -166,7 +193,7 @@ class TrainConfigTests(unittest.TestCase):
         stage_files = [
             path
             for path in stage_files
-            if path.name in {"stage1.toml", "stage2.toml", "stage2_unfrozen_vae.toml"}
+            if path.name in {"stage1.toml", "stage2.toml", "stage2_unfrozen_vae.toml", "stage2_unfrozen_vae_v1.toml"}
         ]
         self.assertTrue(stage_files)
         for path in stage_files:
@@ -176,6 +203,53 @@ class TrainConfigTests(unittest.TestCase):
 
 
 class InferConfigTests(unittest.TestCase):
+    def test_squidiff_profile_alias_normalizes_to_full(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "infer.toml").write_text(
+                "\n".join(
+                    [
+                        "[checkpoint]",
+                        "path = \"/tmp/ckpt.pt\"",
+                        "",
+                        "[input]",
+                        "data_path = \"/tmp/data.h5ad\"",
+                        "",
+                        "[cell_eval]",
+                        "profile = \"squidiff\"",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_infer_config(root / "infer.toml")
+
+            self.assertEqual(config["cell_eval"]["profile"], "full")
+
+    def test_diffusion_overrides_load_for_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "infer.toml").write_text(
+                "\n".join(
+                    [
+                        "[checkpoint]",
+                        "path = \"/tmp/ckpt.pt\"",
+                        "",
+                        "[input]",
+                        "data_path = \"/tmp/data.h5ad\"",
+                        "",
+                        "[diffusion]",
+                        "timestep_respacing = \"ddim50\"",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_infer_config(root / "infer.toml")
+
+            self.assertEqual(config["diffusion"]["timestep_respacing"], "ddim50")
+
+
     def test_all_replogle_infer_configs_load(self) -> None:
         roots = [
             Path("/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/configs/replogle_fewshot/inference"),
@@ -184,12 +258,13 @@ class InferConfigTests(unittest.TestCase):
         infer_files = []
         for root in roots:
             infer_files.extend(sorted(root.glob("*/*.toml")))
-        infer_files = [path for path in infer_files if path.name == "infer.toml"]
+        infer_files = [path for path in infer_files if path.name in {"infer.toml", "infer_v1.toml"}]
         self.assertTrue(infer_files)
         for path in infer_files:
             config = load_infer_config(path)
             self.assertTrue(config["checkpoint"]["path"])
             self.assertEqual(config["input"]["split"]["subset"], "test")
+            self.assertEqual(config["cell_eval"]["profile"], "full")
 
     def test_split_subset_allows_data_path_to_be_omitted(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

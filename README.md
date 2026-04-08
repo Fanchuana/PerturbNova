@@ -86,7 +86,7 @@ Behavior:
 [cell_eval]
 enabled = true
 outdir = "/path/to/output/cell_eval"
-profile = "anndata"
+profile = "full"
 pert_col = "gene"
 celltype_col = "cell_line"
 control_pert = "non-targeting"

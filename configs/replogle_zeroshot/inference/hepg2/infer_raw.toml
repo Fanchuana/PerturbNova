@@ -1,0 +1,14 @@
+base_configs = ["./infer.toml"]
+
+[experiment]
+name = "replogle_zeroshot_hepg2_infer_raw"
+output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/infer_batch_1024_raw"
+
+[checkpoint]
+use_ema = false
+
+[output]
+prediction_path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/infer_batch_1024_raw/predictions.h5ad"
+
+[cell_eval]
+outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/hepg2/infer_batch_1024_raw/cell_eval"

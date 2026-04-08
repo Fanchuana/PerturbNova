@@ -9,6 +9,7 @@ from typing import Iterator
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 
@@ -94,6 +95,13 @@ class DiffusionTrainer:
         self.vae_frozen = (not self.use_vae) or bool(config["vae"]["freeze"])
         self.reconstruction_loss_weight = float(config["vae"]["reconstruction_loss_weight"])
         self.ddp_vae: nn.Module | None = self.vae
+        self.control_usage = str(config["objective"]["control_usage"])
+        self.loss_weights = {
+            key: float(value)
+            for key, value in config["objective"]["loss_weights"].items()
+        }
+        self.use_control_input = self.control_usage in {"input_only", "input_and_loss"}
+        self.use_control_loss = self.control_usage in {"loss_only", "input_and_loss"}
 
         if self.training_mode == "vae_only" and not self.use_vae:
             raise ValueError("`training.mode = vae_only` requires `vae.enabled = true`.")
@@ -122,7 +130,7 @@ class DiffusionTrainer:
             if self.context.is_distributed:
                 ddp_find_unused = bool(config["distributed"]["find_unused_parameters"])
                 # Control attention parameters are conditionally unused when control sets are disabled.
-                if not bool(config["dataset"]["control"]["enabled"]):
+                if not bool(config["dataset"]["control"]["enabled"]) or not self.use_control_input:
                     ddp_find_unused = True
                 self.ddp_model = DDP(
                     self.model,
@@ -318,6 +326,12 @@ class DiffusionTrainer:
         batch = _move_batch_to_device(batch, self.context.device)
         batch_size = batch["features"].shape[0]
         accumulated = {"loss": 0.0, "mse": 0.0}
+        if self.loss_weights.get("xstart_mse", 0.0) > 0:
+            accumulated["xstart_mse"] = 0.0
+        if self.loss_weights.get("effect_batch_mse", 0.0) > 0:
+            accumulated["effect_batch_mse"] = 0.0
+        if self.loss_weights.get("effect_cosine", 0.0) > 0:
+            accumulated["effect_cosine"] = 0.0
         if self.use_vae and not self.vae_frozen and self.reconstruction_loss_weight > 0:
             accumulated["vae_reconstruction"] = 0.0
 
@@ -326,7 +340,9 @@ class DiffusionTrainer:
             micro_raw_features = batch["features"][start:end]
             micro_condition = self._prepare_micro_condition(batch, start, end)
             micro_features = self._encode_tensor(micro_raw_features)
-            micro_condition["control_set"] = self._encode_control_set(micro_condition["control_set"])
+            encoded_control_set = self._encode_control_set(micro_condition["control_set"])
+            control_anchor = encoded_control_set.mean(dim=1) if encoded_control_set is not None else None
+            micro_condition["control_set"] = encoded_control_set if self.use_control_input else None
             timesteps, weights = self.schedule_sampler.sample(micro_features.shape[0], self.context.device)
             with ExitStack() as stack:
                 if self.context.is_distributed and end < batch_size:
@@ -340,7 +356,32 @@ class DiffusionTrainer:
                         timesteps,
                         model_kwargs=micro_condition,
                     )
-                    raw_loss = (loss_dict["loss"] * weights).mean()
+                    diffusion_loss = (loss_dict["loss"] * weights).mean()
+                    raw_loss = self.loss_weights.get("diffusion_mse", 1.0) * diffusion_loss
+                    xstart_mse = None
+                    effect_batch_mse = None
+                    effect_cosine = None
+                    pred_xstart = loss_dict.get("pred_xstart")
+                    if self.loss_weights.get("xstart_mse", 0.0) > 0 and "xstart_mse" in loss_dict:
+                        xstart_mse = (loss_dict["xstart_mse"] * weights).mean()
+                        raw_loss = raw_loss + self.loss_weights["xstart_mse"] * xstart_mse
+                    if self.use_control_loss and control_anchor is not None and pred_xstart is not None:
+                        control_anchor_mean = control_anchor.mean(dim=0, keepdim=True)
+                        pred_effect_mean = pred_xstart.mean(dim=0, keepdim=True) - control_anchor_mean
+                        true_effect_mean = micro_features.mean(dim=0, keepdim=True) - control_anchor_mean
+                        if self.loss_weights.get("effect_batch_mse", 0.0) > 0:
+                            effect_batch_mse = F.mse_loss(pred_effect_mean, true_effect_mean)
+                            raw_loss = raw_loss + self.loss_weights["effect_batch_mse"] * effect_batch_mse
+                        if self.loss_weights.get("effect_cosine", 0.0) > 0:
+                            pred_effect = pred_xstart - control_anchor
+                            true_effect = micro_features - control_anchor
+                            effect_cosine = 1.0 - F.cosine_similarity(
+                                pred_effect,
+                                true_effect,
+                                dim=1,
+                                eps=1e-8,
+                            ).mean()
+                            raw_loss = raw_loss + self.loss_weights["effect_cosine"] * effect_cosine
                     if self.use_vae and not self.vae_frozen and self.reconstruction_loss_weight > 0:
                         reconstruction = self._decode_tensor(micro_features)
                         reconstruction_loss = torch.nn.functional.mse_loss(reconstruction, micro_raw_features)
@@ -354,6 +395,12 @@ class DiffusionTrainer:
             accumulated["loss"] += raw_loss.detach().item() * fraction
             if "mse" in loss_dict:
                 accumulated["mse"] += ((loss_dict["mse"] * weights).mean().detach().item()) * fraction
+            if xstart_mse is not None:
+                accumulated["xstart_mse"] += xstart_mse.detach().item() * fraction
+            if effect_batch_mse is not None:
+                accumulated["effect_batch_mse"] += effect_batch_mse.detach().item() * fraction
+            if effect_cosine is not None:
+                accumulated["effect_cosine"] += effect_cosine.detach().item() * fraction
             if self.use_vae and not self.vae_frozen and self.reconstruction_loss_weight > 0:
                 accumulated["vae_reconstruction"] += reconstruction_loss.detach().item() * fraction
 
@@ -411,7 +458,7 @@ class DiffusionTrainer:
             if method == "ddim"
             else self.diffusion.p_sample_loop
         )
-        latent_control_set = self._encode_control_set(batch.get("control_set"))
+        latent_control_set = self._encode_control_set(batch.get("control_set")) if self.use_control_input else None
         return sample_fn(
             unwrap_model(self.ddp_model),
             shape=(batch["features"].shape[0], self.data_module.artifacts.feature_dim),

@@ -239,10 +239,18 @@ def run_cell_eval_from_config(
     )
     logger.info(f"prepared_eval_dir={cell_eval_outdir}", tag="CEVAL")
 
-    from cell_eval import MetricsEvaluator
-    from cell_eval.utils import split_anndata_on_celltype
+    try:
+        from cell_eval import MetricsEvaluator
+        from cell_eval.utils import split_anndata_on_celltype
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "cell_eval is not installed in the active Python environment; run inference and cell_eval in the same env."
+        ) from exc
 
-    metric_kwargs = _build_metric_kwargs(embed_key="", num_threads=int(config["cell_eval"]["num_threads"]))
+    metric_kwargs = _build_metric_kwargs(
+        embed_key=str(config["cell_eval"]["embed_key"]),
+        num_threads=int(config["cell_eval"]["num_threads"]),
+    )
     skip_metrics = (
         [metric.strip() for metric in str(config["cell_eval"]["skip_metrics"]).split(",") if metric.strip()]
         or None

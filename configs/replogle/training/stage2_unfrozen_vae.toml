@@ -8,13 +8,11 @@ unfreeze_vae_in_stage2 = true
 
 [optimization]
 # Per-rank diffusion batch size.
-batch_size = 64
-# Per-rank microbatch size for diffusion training.
-microbatch_size = 64
+batch_size = 256
 # Number of optimizer updates for joint stage2.
-max_steps = 100000
+max_steps = 20000
 # Linear LR decay horizon for joint stage2. Usually match max_steps.
-lr_anneal_steps = 100000
+lr_anneal_steps = 20000
 # EMA decay rates to save for inference.
 ema_rates = [0.9999]
 # Timestep sampler used by the diffusion objective.
@@ -25,8 +23,6 @@ log_every_steps = 100
 save_every_steps = 5000
 
 [vae]
-# Stage2 consumes a stage1 VAE checkpoint; run configs usually fill this path.
-checkpoint_path = ""
 # Keep the VAE trainable in the joint stage2 template.
 freeze = false
 # Weight of the extra reconstruction loss while VAE is unfrozen.
