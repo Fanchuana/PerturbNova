@@ -1,2 +1,0 @@
-/bin/sh: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)
-slurmstepd: error: *** JOB 147435 ON g01n14 CANCELLED AT 2026-04-09T00:27:37 ***
