@@ -1,5 +1,0 @@
-base_configs = ["../../replogle/inference/base.toml"]
-
-[experiment]
-name = "replogle_zeroshot_infer"
-output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zeroshot/default_infer"

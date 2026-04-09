@@ -16,3 +16,8 @@ experiments/
 *.log
 *.tmp
 debug_merged.csv
+
+# Local directories
+configs/
+experiments/
+outputs/

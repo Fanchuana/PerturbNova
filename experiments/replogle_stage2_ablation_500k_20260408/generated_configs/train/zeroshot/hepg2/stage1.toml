@@ -1,6 +1,0 @@
-base_configs = ["/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/configs/replogle_zeroshot/runs/hepg2/stage1.toml"]
-
-[experiment]
-name = "replogle_stage2_ablation_500k_20260408_zeroshot_hepg2_stage1"
-output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/zeroshot/hepg2/stage1"
-log_render = "rich"

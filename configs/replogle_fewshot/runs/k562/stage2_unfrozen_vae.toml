@@ -1,8 +1,0 @@
-base_configs = ["../../../replogle/common/base.toml", "../../../replogle/data/source/fewshot_k562.toml", "../../../replogle/data/views/state_latent_hvg.toml", "../../../replogle/model/film_latent_diffusion.toml", "../../../replogle/training/stage2_unfrozen_vae.toml"]
-
-[experiment]
-name = "replogle_fewshot_k562_stage2_unfrozen_vae"
-output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_fewshot/k562/stage2_unfrozen_vae"
-
-[vae]
-checkpoint_path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_fewshot/k562/stage1/vae_checkpoints/latest.pt"

@@ -1,3 +1,0 @@
-base_configs = ["/work/home/cryoem666/xyf/temp/pycharm/state/data/dataset/config/new_dataset/zeroshot_k562.toml"]
-
-task = "state_perturbation"
