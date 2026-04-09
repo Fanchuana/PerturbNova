@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,13 @@ _GREEN = "\033[32m"
 _YELLOW = "\033[33m"
 _MAGENTA = "\033[35m"
 _RED = "\033[31m"
+_WHITE = "\033[37m"
+_BRIGHT_BLUE = "\033[94m"
+_BRIGHT_CYAN = "\033[96m"
+_BRIGHT_GREEN = "\033[92m"
+_BRIGHT_YELLOW = "\033[93m"
+_BRIGHT_MAGENTA = "\033[95m"
+_BRIGHT_RED = "\033[91m"
 
 
 def _format_value(value: Any) -> str:
@@ -35,6 +43,44 @@ def _short_metric_name(name: str) -> str:
         "r2_mean": "r2",
     }
     return replacements.get(name, name)
+
+
+def _metric_sort_key(name: str) -> tuple[int, str, int, str]:
+    base_order = {
+        "loss": 0,
+        "mse": 1,
+        "xstart_mse": 2,
+        "effect_batch_mse": 3,
+        "effect_cosine": 4,
+        "vae_reconstruction": 5,
+        "r2_mean": 6,
+        "pearson_mean": 7,
+        "mmd": 8,
+        "lr": 99,
+    }
+    match = re.fullmatch(r"(.+)_q([0-3])", name)
+    if match:
+        base = match.group(1)
+        quartile = int(match.group(2))
+        return (base_order.get(base, 50), base, quartile + 1, name)
+    return (base_order.get(name, 50), name, 0, name)
+
+
+def _metric_palette(name: str) -> tuple[str, str]:
+    base_name = re.sub(r"_q[0-3]$", "", name)
+    palettes = {
+        "loss": (_BRIGHT_RED, _BRIGHT_YELLOW),
+        "mse": (_BRIGHT_MAGENTA, _BRIGHT_CYAN),
+        "xstart_mse": (_MAGENTA, _BRIGHT_CYAN),
+        "effect_batch_mse": (_YELLOW, _BRIGHT_BLUE),
+        "effect_cosine": (_YELLOW, _BRIGHT_MAGENTA),
+        "vae_reconstruction": (_GREEN, _BRIGHT_GREEN),
+        "r2_mean": (_BRIGHT_GREEN, _WHITE),
+        "pearson_mean": (_BRIGHT_GREEN, _WHITE),
+        "mmd": (_BRIGHT_YELLOW, _WHITE),
+        "lr": (_BRIGHT_BLUE, _BRIGHT_MAGENTA),
+    }
+    return palettes.get(base_name, (_WHITE, _BRIGHT_CYAN))
 
 
 class ExperimentLogger:
@@ -108,6 +154,44 @@ class ExperimentLogger:
     def _format_compact_metrics(self, metrics: dict[str, Any]) -> str:
         return ", ".join(f"{key}={value:.6f}" if isinstance(value, float) else f"{key}={value}" for key, value in metrics.items())
 
+    def _format_mapping(self, values: dict[str, Any]) -> str:
+        pieces = []
+        for key, value in values.items():
+            key_text = self._style(str(key), _BOLD, _BRIGHT_BLUE)
+            value_text = self._style(_format_value(value), _WHITE)
+            pieces.append(f"{key_text} {self._style('›', _DIM, _BRIGHT_CYAN)} {value_text}")
+        return f" {self._style('•', _DIM, _BRIGHT_MAGENTA)} ".join(pieces)
+
+    def _format_metric_table(self, step: int, split: str, metrics: dict[str, Any]) -> str:
+        rows: list[tuple[str, str]] = []
+        rows.append(("split", split))
+        if self.progress_total > 0:
+            progress_pct = min(max(step / float(self.progress_total), 0.0), 1.0) * 100.0
+            rows.append(("step", f"{step}/{self.progress_total} ({progress_pct:.1f}%)"))
+        else:
+            rows.append(("step", str(step)))
+        for key in sorted(metrics.keys(), key=_metric_sort_key):
+            rows.append((key, _format_value(metrics[key])))
+
+        plain_rows = [(str(k), str(v)) for k, v in rows]
+        key_width = max(len(k) for k, _ in plain_rows)
+        value_width = max(len(v) for _, v in plain_rows)
+
+        top = self._style("╭" + "─" * (key_width + 2) + "┬" + "─" * (value_width + 2) + "╮", _BRIGHT_BLUE)
+        mid = self._style("├" + "─" * (key_width + 2) + "┼" + "─" * (value_width + 2) + "┤", _DIM, _BRIGHT_BLUE)
+        bot = self._style("╰" + "─" * (key_width + 2) + "┴" + "─" * (value_width + 2) + "╯", _BRIGHT_BLUE)
+
+        lines = [top]
+        for index, (key, value) in enumerate(plain_rows):
+            label_color, value_color = _metric_palette(key)
+            label = self._style(f"{key:<{key_width}}", _BOLD, label_color)
+            rendered_value = self._style(f"{value:<{value_width}}", value_color)
+            lines.append(f"{self._style('│', _BRIGHT_BLUE)} {label} {self._style('│', _BRIGHT_BLUE)} {rendered_value} {self._style('│', _BRIGHT_BLUE)}")
+            if index == 1:
+                lines.append(mid)
+        lines.append(bot)
+        return "\n".join(lines)
+
     def info(self, message: str, tag: str = "INFO") -> None:
         if not self.enabled:
             return
@@ -130,6 +214,13 @@ class ExperimentLogger:
         self.info(run_message, tag="RUN")
         self.info(f"output={self.output_dir}", tag="PATH")
 
+    def log_mapping(self, title: str, values: dict[str, Any], tag: str = "INFO") -> None:
+        if not self.enabled or not values:
+            return
+        payload = self._format_mapping(values)
+        decorated_title = self._style(title, _BOLD, _BRIGHT_MAGENTA) if self.render == "rich" else title
+        self.info(f"{decorated_title} {self._style('◆', _DIM, _BRIGHT_CYAN) if self.render == 'rich' else '|'} {payload}", tag=tag)
+
     def log_metrics(self, step: int, split: str, metrics: dict[str, Any]) -> None:
         if not self.enabled:
             return
@@ -142,19 +233,9 @@ class ExperimentLogger:
             self._logger.info("[%s step=%s] %s", split, step, formatted)
             return
 
-        progress_bar = self._progress_bar(step)
-        if self.progress_total > 0:
-            progress_pct = min(max(step / float(self.progress_total), 0.0), 1.0) * 100.0
-            progress_text = (
-                f"step {step:>6}/{self.progress_total:<6}"
-                f" | {progress_pct:5.1f}%"
-                f" | {self._style(progress_bar, _DIM)}"
-            )
-        else:
-            progress_text = f"step {step}"
-        metric_text = self._format_rich_metrics(metrics)
         tag = "TRAIN" if split == "train" else split.upper()
-        self.info(f"{progress_text} | {metric_text}", tag=tag)
+        table = self._format_metric_table(step=step, split=split, metrics=metrics)
+        self.info(table, tag=tag)
 
     def log_checkpoint(self, step: int, path: str | Path, kind: str = "ckpt") -> None:
         self.info(f"step {step} | saved={path}", tag=kind.upper())

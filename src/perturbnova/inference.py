@@ -100,6 +100,11 @@ class DiffusionInferenceRunner:
             if use_ema
             else self.payload["model"]
         )
+        self.model_source = (
+            f"ema@{config['checkpoint']['ema_rate']}"
+            if use_ema
+            else "raw"
+        )
         self.model.load_state_dict(state_dict)
         self.model.eval()
         diffusion_config = deepcopy(self.train_config["diffusion"])
@@ -110,6 +115,7 @@ class DiffusionInferenceRunner:
         if self.context.is_main_process:
             export_json(self.output_dir / "infer_config_snapshot.json", self.config)
             self.logger.log_run_header()
+            self._log_inference_context()
 
     def _resolve_prediction_path(self) -> Path:
         output_config = self.config["output"]
@@ -137,6 +143,84 @@ class DiffusionInferenceRunner:
         barrier(self.context)
         shard_dir.mkdir(parents=True, exist_ok=True)
         return shard_dir
+
+    def _log_inference_context(self) -> None:
+        self.logger.log_mapping(
+            "env",
+            {
+                "device": self.context.device,
+                "backend": self.context.backend,
+                "world": self.context.world_size,
+                "seed": self.config["experiment"]["seed"],
+            },
+            tag="ENV",
+        )
+        self.logger.log_mapping(
+            "checkpoint",
+            {
+                "path": self.config["checkpoint"]["path"],
+                "model_source": self.model_source,
+                "ema_rate": self.config["checkpoint"]["ema_rate"],
+            },
+            tag="CKPT",
+        )
+        self.logger.log_mapping(
+            "dataset",
+            {
+                "train_data_path": self.train_config["dataset"]["data_path"],
+                "infer_data_path": self.config["input"]["data_path"] or "",
+                "reference_data_path": self.config["input"]["reference_data_path"] or "",
+                "subset": self.config["input"]["split"]["subset"],
+                "dataset_config_path": self.config["input"]["split"]["dataset_config_path"] or "",
+                "raw_dim": self.artifacts.raw_feature_dim,
+                "latent_dim": self.artifacts.feature_dim,
+            },
+            tag="DATA",
+        )
+        self.logger.log_mapping(
+            "model",
+            {
+                "name": self.train_config["model"]["name"],
+                "hidden_dim": self.train_config["model"]["hidden_dim"],
+                "layers": self.train_config["model"]["num_layers"],
+                "time_embed_dim": self.train_config["model"]["time_embed_dim"],
+            },
+            tag="MODEL",
+        )
+        self.logger.log_mapping(
+            "sampling",
+            {
+                "method": self.config["sampling"]["method"],
+                "batch_size": self.config["sampling"]["batch_size"],
+                "cfg_scale": self.config["sampling"]["cfg_scale"],
+                "eta": self.config["sampling"]["eta"],
+                "clip_denoised": self.config["sampling"]["clip_denoised"],
+                "timestep_respacing": self.config.get("diffusion", {}).get("timestep_respacing", ""),
+            },
+            tag="SAMPLE",
+        )
+        self.logger.log_mapping(
+            "output",
+            {
+                "prediction_path": self._resolve_prediction_path(),
+                "write_to": self.config["output"]["write_to"],
+                "key": self.config["output"]["key"],
+                "real_copy_path": self._resolve_real_copy_path() or "",
+                "cell_eval_enabled": self.config.get("cell_eval", {}).get("enabled", False),
+                "cell_eval_outdir": self.config.get("cell_eval", {}).get("outdir", ""),
+            },
+            tag="PATH",
+        )
+        self.logger.log_mapping(
+            "vae",
+            {
+                "enabled": self.vae is not None,
+                "checkpoint": self.train_config.get("vae", {}).get("checkpoint_path", ""),
+                "freeze": self.train_config.get("vae", {}).get("freeze", True),
+                "decode_predictions": self.train_config.get("vae", {}).get("decode_predictions", True),
+            },
+            tag="VAE",
+        )
 
     def _write_predictions(self, target_adata, latent_predictions: np.ndarray) -> None:
         output_config = self.config["output"]
@@ -193,6 +277,21 @@ class DiffusionInferenceRunner:
             artifacts=self.artifacts,
             distributed_context=self.context,
         )
+        if self.context.is_main_process:
+            pert_col = self.train_config["dataset"]["obs_keys"]["perturbation"]
+            control_label = self.artifacts.control_label
+            pert_names = target_adata.obs[pert_col].astype(str).to_numpy() if pert_col in target_adata.obs else np.array([])
+            control_count = int((pert_names == control_label).sum()) if pert_names.size else 0
+            self.logger.log_mapping(
+                "target",
+                {
+                    "n_obs": target_adata.n_obs,
+                    "control": control_count,
+                    "perturbed": target_adata.n_obs - control_count,
+                    "n_vars": target_adata.n_vars,
+                },
+                tag="DATA",
+            )
         if sampler is not None:
             sampler.set_epoch(0)
 

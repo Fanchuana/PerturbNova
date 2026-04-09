@@ -249,6 +249,54 @@ class InferConfigTests(unittest.TestCase):
 
             self.assertEqual(config["diffusion"]["timestep_respacing"], "ddim50")
 
+    def test_base_infer_relative_dataset_config_path_resolves_from_base_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            base_dir = root / "base"
+            child_dir = root / "child"
+            data_dir = root / "data"
+            base_dir.mkdir()
+            child_dir.mkdir()
+            data_dir.mkdir()
+
+            (data_dir / "dataset.toml").write_text(
+                "\n".join(
+                    [
+                        "[dataset]",
+                        'data_path = "/tmp/data.h5ad"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (base_dir / "infer_base.toml").write_text(
+                "\n".join(
+                    [
+                        "[checkpoint]",
+                        'path = "/tmp/ckpt.pt"',
+                        "",
+                        "[input.split]",
+                        'subset = "test"',
+                        'dataset_config_path = "../data/dataset.toml"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (child_dir / "infer.toml").write_text(
+                '\n'.join(
+                    [
+                        'base_configs = ["../base/infer_base.toml"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_infer_config(child_dir / "infer.toml")
+
+            self.assertEqual(
+                config["input"]["split"]["dataset_config_path"],
+                str((data_dir / "dataset.toml").resolve()),
+            )
+
 
     def test_all_replogle_infer_configs_load(self) -> None:
         roots = [
