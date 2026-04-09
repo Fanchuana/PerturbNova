@@ -5,7 +5,6 @@ __pycache__/
 
 # 输出目录
 outputs/
-experiments/
 
 # 模型检查点（如果太大）
 *.pt

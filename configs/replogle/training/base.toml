@@ -14,7 +14,8 @@ pin_memory = true
 # Keep dataloader workers alive between epochs.
 persistent_workers = true
 # Global gradient clipping threshold.
-gradient_clip_norm = 1.0
+gradient_clip_norm = 0.0
+loss_logging_mode = "squidiff"
 
 [checkpoint]
 # Resume the current stage from a checkpoint file or from an output directory.
@@ -39,3 +40,4 @@ effect_cosine = 0.0
 enabled = true
 # Number of batches to use during each validation run.
 num_batches = 1
+

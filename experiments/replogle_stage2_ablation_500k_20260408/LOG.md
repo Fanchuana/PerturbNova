@@ -8,7 +8,11 @@
 - 备用资源：`147251` (g01n14), `147252` (g01n15)
 
 ## TODO
-- [ ] Stage1 bootstrap (8 runs)
+- [x] Stage1 bootstrap (8 runs)
 - [ ] Stage2 ablation (24 runs)
 - [ ] Infer + cell_eval (24 runs)
 - [ ] 汇总结果表
+
+## 2026-04-08 (update)
+- 已核对 8 个 stage1 VAE checkpoint (`vae_checkpoints/latest.pt`) 均已生成。
+- 可进入 stage2 wave1：`zeroshot/frozen_500k` 与 `zeroshot/unfrozen_500k`。

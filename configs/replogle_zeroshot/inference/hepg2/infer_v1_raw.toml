@@ -16,3 +16,4 @@ outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/replogle_zer
 
 [diffusion]
 timestep_respacing = "ddim50"
+

@@ -5,16 +5,18 @@ base_configs = ["./base.toml"]
 stage = "stage1"
 
 [optimization]
-# Per-rank VAE batch size. Global batch size = batch_size x world_size.
 batch_size = 128
-# Number of optimizer updates for stage1.
 max_steps = 200000
-# Linear LR decay horizon for stage1. Usually match max_steps.
 lr_anneal_steps = 200000
-# How often to print VAE training metrics.
 log_every_steps = 1000
-# How often to save stage1 VAE checkpoints.
 save_every_steps = 50000
+lr = 0.0005
+weight_decay = 0.01
+gradient_clip_norm = 0.0
+num_workers = 1
+persistent_workers = false
+
+
 
 [vae]
 # Optional full VAE checkpoint to continue stage1 or reuse an existing autoencoder.
@@ -26,4 +28,4 @@ freeze = false
 
 [evaluation]
 # How often to run stage1 reconstruction validation.
-every_steps = 5000
+every_steps = 10000

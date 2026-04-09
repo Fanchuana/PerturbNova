@@ -88,6 +88,7 @@ DEFAULT_TRAIN_CONFIG: dict[str, Any] = {
         "pin_memory": True,
         "persistent_workers": True,
         "gradient_clip_norm": 1.0,
+        "loss_logging_mode": "step",
         "log_every_steps": 100,
         "save_every_steps": 1000,
     },
@@ -228,6 +229,17 @@ def _load_toml(path: str | Path) -> dict[str, Any]:
         return tomllib.load(handle)
 
 
+def _normalize_relative_dataset_config_path(config: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+    config = deepcopy(config)
+    split_config = config.get("input", {}).get("split", {})
+    dataset_config_path = split_config.get("dataset_config_path", "")
+    if dataset_config_path:
+        candidate = Path(dataset_config_path)
+        if not candidate.is_absolute():
+            split_config["dataset_config_path"] = str((base_dir / candidate).resolve())
+    return config
+
+
 def load_train_config(path: str | Path) -> dict[str, Any]:
     config = _load_toml_with_bases(path)
     config = _normalize_train_dataset_aliases(config)
@@ -268,6 +280,7 @@ def _load_toml_with_bases(
     current = _load_toml(path)
     base_configs = current.pop("base_configs", [])
     current = _normalize_state_style_dataset_config(current)
+    current = _normalize_relative_dataset_config_path(current, path.parent)
     if isinstance(base_configs, (str, Path)):
         base_configs = [base_configs]
 

@@ -2,17 +2,17 @@ base_configs = ["/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/configs/replo
 
 [experiment]
 name = "replogle_stage2_ablation_500k_20260408_fewshot_hepg2_frozen_500k_infer"
-output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/fewshot/hepg2/frozen_500k_infer"
+output_dir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/fewshot/hepg2/frozen_500k_infer_ddim1000"
 
 [checkpoint]
 path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/fewshot/hepg2/frozen_500k/checkpoints/latest.pt"
 use_ema = false
 
 [output]
-prediction_path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/fewshot/hepg2/frozen_500k_infer/predictions.h5ad"
+prediction_path = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/fewshot/hepg2/frozen_500k_infer_ddim1000/predictions.h5ad"
 
 [cell_eval]
-outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/fewshot/hepg2/frozen_500k_infer/cell_eval"
+outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/replogle_stage2_ablation_500k_20260408/fewshot/hepg2/frozen_500k_infer_ddim1000/cell_eval"
 skip_metrics = "pearson_edistance,clustering_agreement"
 
 [diffusion]

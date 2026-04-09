@@ -1,0 +1,4 @@
+[train] task=zeroshot variant=unfrozen_500k split=hepg2 gpu=0 cfg=/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/experiments/replogle_stage2_ablation_500k_20260408/generated_configs/train/zeroshot/hepg2/unfrozen_500k.toml
+[train] task=zeroshot variant=unfrozen_500k split=jurkat gpu=1 cfg=/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/experiments/replogle_stage2_ablation_500k_20260408/generated_configs/train/zeroshot/jurkat/unfrozen_500k.toml
+[train] task=zeroshot variant=unfrozen_500k split=k562 gpu=2 cfg=/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/experiments/replogle_stage2_ablation_500k_20260408/generated_configs/train/zeroshot/k562/unfrozen_500k.toml
+[train] task=zeroshot variant=unfrozen_500k split=rpe1 gpu=3 cfg=/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/experiments/replogle_stage2_ablation_500k_20260408/generated_configs/train/zeroshot/rpe1/unfrozen_500k.toml

@@ -67,6 +67,47 @@ def _mmd_rbf(source: torch.Tensor, target: torch.Tensor, kernel_mul: float = 2.0
     return float(torch.mean(xx + yy - xy - yx).item())
 
 
+def _quartile_name(timestep: int, num_timesteps: int) -> str:
+    quartile = int(4 * timestep / max(num_timesteps, 1))
+    quartile = min(max(quartile, 0), 3)
+    return f"q{quartile}"
+
+
+def _accumulate_metric_buffer(
+    sums: dict[str, float],
+    counts: dict[str, int],
+    metrics: dict[str, float],
+) -> None:
+    for key, value in metrics.items():
+        if not isinstance(value, (int, float)):
+            continue
+        sums[key] = sums.get(key, 0.0) + float(value)
+        counts[key] = counts.get(key, 0) + 1
+
+
+def _merge_metric_buffers(
+    target_sums: dict[str, float],
+    target_counts: dict[str, int],
+    source_sums: dict[str, float],
+    source_counts: dict[str, int],
+) -> None:
+    for key, total in source_sums.items():
+        target_sums[key] = target_sums.get(key, 0.0) + float(total)
+        target_counts[key] = target_counts.get(key, 0) + int(source_counts.get(key, 0))
+
+
+def _average_metric_buffer(
+    sums: dict[str, float],
+    counts: dict[str, int],
+) -> dict[str, float]:
+    averaged: dict[str, float] = {}
+    for key, total in sums.items():
+        count = counts.get(key, 0)
+        if count > 0:
+            averaged[key] = total / count
+    return averaged
+
+
 class DiffusionTrainer:
     def __init__(self, config: dict, distributed_context: DistributedContext) -> None:
         self.config = config
@@ -168,6 +209,7 @@ class DiffusionTrainer:
         self.max_steps = int(config["optimization"]["max_steps"])
         self.lr_anneal_steps = int(config["optimization"]["lr_anneal_steps"])
         self.grad_clip = float(config["optimization"]["gradient_clip_norm"])
+        self.loss_logging_mode = str(config["optimization"].get("loss_logging_mode", "step")).strip().lower()
 
         if self.context.is_main_process:
             export_json(self.output_dir / "config_snapshot.json", self.config)
@@ -190,6 +232,8 @@ class DiffusionTrainer:
         if self.use_vae:
             vae_parameter_count = sum(parameter.numel() for parameter in self.vae.parameters())
             self.logger.info(f"VAE parameters: {vae_parameter_count:,}")
+        if self.context.is_main_process:
+            self._log_training_context()
 
     def _initialize_ema_state(self) -> dict[str, dict[str, torch.Tensor]]:
         current_state = unwrap_model(self.ddp_model).state_dict()
@@ -321,11 +365,151 @@ class DiffusionTrainer:
         for group in self.optimizer.param_groups:
             group["lr"] = lr
 
-    def _run_train_step(self, batch: dict[str, torch.Tensor], step: int) -> dict[str, float]:
+    def _log_training_context(self) -> None:
+        dataset_config = self.config["dataset"]
+        self.logger.log_mapping(
+            "env",
+            {
+                "device": self.context.device,
+                "backend": self.context.backend,
+                "world": self.context.world_size,
+                "seed": self.config["experiment"]["seed"],
+            },
+            tag="ENV",
+        )
+        self.logger.log_mapping(
+            "dataset",
+            {
+                "path": dataset_config["data_path"],
+                "split_mode": dataset_config["split"]["mode"],
+                "target_cell_type": dataset_config["split"].get("target_cell_type", ""),
+                "feature_source": dataset_config["feature_space"]["source"],
+                "feature_key": dataset_config["feature_space"]["key"],
+                "raw_dim": self.data_module.artifacts.raw_feature_dim,
+                "latent_dim": self.data_module.artifacts.feature_dim,
+            },
+            tag="DATA",
+        )
+        if self.ddp_model is not None:
+            self.logger.log_mapping(
+                "model",
+                {
+                    "name": self.config["model"]["name"],
+                    "hidden_dim": self.config["model"]["hidden_dim"],
+                    "layers": self.config["model"]["num_layers"],
+                    "time_embed_dim": self.config["model"]["time_embed_dim"],
+                    "dropout": self.config["model"]["dropout"],
+                    "perturb_dropout": self.config["model"]["perturbation_dropout"],
+                },
+                tag="MODEL",
+            )
+            self.logger.log_mapping(
+                "diffusion",
+                {
+                    "steps": self.config["diffusion"]["steps"],
+                    "noise_schedule": self.config["diffusion"]["noise_schedule"],
+                    "timestep_respacing": self.config["diffusion"]["timestep_respacing"] or "",
+                    "predict_xstart": self.config["diffusion"]["predict_xstart"],
+                },
+                tag="DIFF",
+            )
+        self.logger.log_mapping(
+            "optimization",
+            {
+                "batch_size": self.config["optimization"]["batch_size"],
+                "microbatch_size": self.microbatch_size,
+                "max_steps": self.max_steps,
+                "lr": self.config["optimization"]["lr"],
+                "weight_decay": self.config["optimization"]["weight_decay"],
+                "schedule_sampler": self.config["optimization"]["schedule_sampler"],
+                "ema_rates": ",".join(str(x) for x in self.ema_rates) if self.ema_rates else "",
+                "grad_clip": self.grad_clip,
+            },
+            tag="OPT",
+        )
+        self.logger.log_mapping(
+            "objective",
+            {
+                "training_mode": self.training_mode,
+                "control_usage": self.control_usage,
+                **self.loss_weights,
+            },
+            tag="LOSS",
+        )
+        self.logger.log_mapping(
+            "vae",
+            {
+                "enabled": self.use_vae,
+                "freeze": self.vae_frozen,
+                "checkpoint": self.config["vae"].get("checkpoint_path", ""),
+                "pretrained_state_dir": self.config["vae"].get("pretrained_state_dir", ""),
+                "latent_dim": self.config["vae"].get("latent_dim", ""),
+                "recon_weight": self.reconstruction_loss_weight,
+                "decode_predictions": self.config["vae"].get("decode_predictions", True),
+            },
+            tag="VAE",
+        )
+        if self.config["checkpoint"]["resume_path"]:
+            self.logger.log_mapping(
+                "resume",
+                {
+                    "path": self.config["checkpoint"]["resume_path"],
+                    "start_step": self.start_step,
+                },
+                tag="CKPT",
+            )
+
+    def _accumulate_bucketed_losses(
+        self,
+        bucket_sums: dict[str, float],
+        bucket_counts: dict[str, int],
+        timesteps: torch.Tensor,
+        values: torch.Tensor,
+        key: str,
+    ) -> None:
+        if self.diffusion is None:
+            return
+        ts = timesteps.detach().cpu().tolist()
+        vals = values.detach().cpu().tolist()
+        for sub_t, sub_value in zip(ts, vals):
+            bucket_name = _quartile_name(int(sub_t), self.diffusion.num_timesteps)
+            metric_key = f"{key}_{bucket_name}"
+            bucket_sums[metric_key] = bucket_sums.get(metric_key, 0.0) + float(sub_value)
+            bucket_counts[metric_key] = bucket_counts.get(metric_key, 0) + 1
+
+    def _accumulate_squidiff_style_losses(
+        self,
+        log_sums: dict[str, float],
+        log_counts: dict[str, int],
+        timesteps: torch.Tensor,
+        loss_dict: dict[str, torch.Tensor],
+        weights: torch.Tensor,
+    ) -> None:
+        for key, value in loss_dict.items():
+            if not isinstance(value, torch.Tensor):
+                continue
+            if value.ndim != 1 or value.shape[0] != timesteps.shape[0]:
+                continue
+            weighted = value * weights
+            log_sums[key] = log_sums.get(key, 0.0) + float(weighted.mean().detach().item())
+            log_counts[key] = log_counts.get(key, 0) + 1
+            self._accumulate_bucketed_losses(
+                bucket_sums=log_sums,
+                bucket_counts=log_counts,
+                timesteps=timesteps,
+                values=weighted,
+                key=key,
+            )
+
+    def _run_train_step(self, batch: dict[str, torch.Tensor], step: int) -> tuple[dict[str, float], dict[str, float], dict[str, int]]:
         self.optimizer.zero_grad(set_to_none=True)
         batch = _move_batch_to_device(batch, self.context.device)
         batch_size = batch["features"].shape[0]
         accumulated = {"loss": 0.0, "mse": 0.0}
+        bucket_sums: dict[str, float] = {}
+        bucket_counts: dict[str, int] = {}
+        log_sums: dict[str, float] = {}
+        log_counts: dict[str, int] = {}
         if self.loss_weights.get("xstart_mse", 0.0) > 0:
             accumulated["xstart_mse"] = 0.0
         if self.loss_weights.get("effect_batch_mse", 0.0) > 0:
@@ -390,6 +574,13 @@ class DiffusionTrainer:
                 if isinstance(self.schedule_sampler, LossAwareSampler):
                     self.schedule_sampler.update_with_local_losses(timesteps, loss_dict["loss"].detach())
                 self.scaler.scale(scaled_loss).backward()
+                self._accumulate_squidiff_style_losses(
+                    log_sums=log_sums,
+                    log_counts=log_counts,
+                    timesteps=timesteps,
+                    loss_dict=loss_dict,
+                    weights=weights,
+                )
 
             fraction = micro_features.shape[0] / batch_size
             accumulated["loss"] += raw_loss.detach().item() * fraction
@@ -416,14 +607,20 @@ class DiffusionTrainer:
         self.scaler.update()
         self._update_ema()
         self._anneal_lr(step + 1)
+        for key, total in log_sums.items():
+            count = log_counts.get(key, 0)
+            if count > 0:
+                accumulated[key] = total / count
         accumulated["lr"] = float(self.optimizer.param_groups[0]["lr"])
-        return accumulated
+        return accumulated, log_sums, log_counts
 
-    def _run_vae_only_step(self, batch: dict[str, torch.Tensor], step: int) -> dict[str, float]:
+    def _run_vae_only_step(self, batch: dict[str, torch.Tensor], step: int) -> tuple[dict[str, float], dict[str, float], dict[str, int]]:
         self.optimizer.zero_grad(set_to_none=True)
         batch = _move_batch_to_device(batch, self.context.device)
         batch_size = batch["features"].shape[0]
         accumulated = {"vae_reconstruction": 0.0}
+        log_sums: dict[str, float] = {}
+        log_counts: dict[str, int] = {}
 
         for start in range(0, batch_size, self.microbatch_size):
             end = min(start + self.microbatch_size, batch_size)
@@ -440,6 +637,8 @@ class DiffusionTrainer:
                     scaled_loss = raw_loss * (micro_features.shape[0] / batch_size)
                 self.scaler.scale(scaled_loss).backward()
             accumulated["vae_reconstruction"] += raw_loss.detach().item() * (micro_features.shape[0] / batch_size)
+            log_sums["vae_reconstruction"] = log_sums.get("vae_reconstruction", 0.0) + raw_loss.detach().item()
+            log_counts["vae_reconstruction"] = log_counts.get("vae_reconstruction", 0) + 1
 
         if self.scaler.is_enabled():
             self.scaler.unscale_(self.optimizer)
@@ -449,7 +648,7 @@ class DiffusionTrainer:
         self.scaler.update()
         self._anneal_lr(step + 1)
         accumulated["lr"] = float(self.optimizer.param_groups[0]["lr"])
-        return accumulated
+        return accumulated, log_sums, log_counts
 
     def _sample_predictions(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         method = self.config["evaluation"]["sampling_method"]
@@ -547,16 +746,25 @@ class DiffusionTrainer:
                 self.vae.eval()
             else:
                 self.vae.train()
+        train_metric_sums: dict[str, float] = {}
+        train_metric_counts: dict[str, int] = {}
         for step in range(self.start_step, self.max_steps):
             batch = next(train_iterator)
             if self.training_mode == "vae_only":
-                train_metrics = self._run_vae_only_step(batch, step)
+                train_metrics, log_sums, log_counts = self._run_vae_only_step(batch, step)
             else:
-                train_metrics = self._run_train_step(batch, step)
+                train_metrics, log_sums, log_counts = self._run_train_step(batch, step)
+            if self.loss_logging_mode == "squidiff":
+                _merge_metric_buffers(train_metric_sums, train_metric_counts, log_sums, log_counts)
+            else:
+                _accumulate_metric_buffer(train_metric_sums, train_metric_counts, train_metrics)
             if self.context.is_main_process and (
                 step == self.start_step or (step + 1) % self.config["optimization"]["log_every_steps"] == 0
             ):
-                self.logger.log_metrics(step=step + 1, split="train", metrics=train_metrics)
+                averaged_metrics = _average_metric_buffer(train_metric_sums, train_metric_counts)
+                self.logger.log_metrics(step=step + 1, split="train", metrics=averaged_metrics)
+                train_metric_sums.clear()
+                train_metric_counts.clear()
 
             if (step + 1) % self.config["optimization"]["save_every_steps"] == 0:
                 if self.training_mode == "vae_only":

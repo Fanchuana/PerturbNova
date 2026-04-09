@@ -16,4 +16,4 @@ outdir = "/work/home/cryoem666/xyf/temp/pycharm/PerturbNova/outputs/experiments/
 skip_metrics = "pearson_edistance,clustering_agreement"
 
 [diffusion]
-timestep_respacing = ""
+timestep_respacing = "ddim50"
