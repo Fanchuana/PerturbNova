@@ -156,7 +156,13 @@ class FiLMConditionEncoder(nn.Module):
 
 
 class AdditiveMLPBlock(nn.Module):
-    def __init__(self, hidden_dim: int, time_embed_dim: int, dropout: float) -> None:
+    def __init__(
+        self,
+        hidden_dim: int,
+        time_embed_dim: int,
+        dropout: float,
+        block_residual_scale: float,
+    ) -> None:
         super().__init__()
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
@@ -165,6 +171,7 @@ class AdditiveMLPBlock(nn.Module):
         self.time_projection = nn.Linear(time_embed_dim, hidden_dim)
         self.condition_projection = nn.Linear(hidden_dim, hidden_dim)
         self.dropout = nn.Dropout(dropout)
+        self.block_residual_scale = float(block_residual_scale)
 
     def forward(
         self,
@@ -172,6 +179,7 @@ class AdditiveMLPBlock(nn.Module):
         time_embedding_: torch.Tensor | None,
         condition: torch.Tensor | None,
     ) -> torch.Tensor:
+        residual = hidden
         hidden = F.silu(self.norm1(self.fc1(hidden)))
         if time_embedding_ is not None:
             hidden = hidden + self.time_projection(time_embedding_)
@@ -179,11 +187,21 @@ class AdditiveMLPBlock(nn.Module):
             hidden = hidden + self.condition_projection(condition)
         hidden = self.dropout(hidden)
         hidden = F.silu(self.norm2(self.fc2(hidden)))
-        return hidden
+        return hidden + self.block_residual_scale * residual
 
 
 class FiLMMLPBlock(nn.Module):
-    def __init__(self, hidden_dim: int, time_embed_dim: int, dropout: float, control_heads: int) -> None:
+    def __init__(
+        self,
+        hidden_dim: int,
+        time_embed_dim: int,
+        dropout: float,
+        control_heads: int,
+        block_residual_scale: float,
+        film_bound_mode: str,
+        film_gamma_scale: float,
+        film_beta_scale: float,
+    ) -> None:
         super().__init__()
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
         self.fc2 = nn.Linear(hidden_dim, hidden_dim)
@@ -192,6 +210,23 @@ class FiLMMLPBlock(nn.Module):
         self.time_projection = nn.Linear(time_embed_dim, hidden_dim)
         self.dropout = nn.Dropout(dropout)
         self.control_attention = ControlSetAttention(hidden_dim, control_heads)
+        self.block_residual_scale = float(block_residual_scale)
+        self.film_bound_mode = str(film_bound_mode).strip().lower()
+        self.film_gamma_scale = float(film_gamma_scale)
+        self.film_beta_scale = float(film_beta_scale)
+
+    def _bound_film(
+        self,
+        gamma: torch.Tensor,
+        beta: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.film_bound_mode == "tanh":
+            gamma = self.film_gamma_scale * torch.tanh(gamma)
+            beta = self.film_beta_scale * torch.tanh(beta)
+        elif self.film_bound_mode == "clamp":
+            gamma = gamma.clamp(-self.film_gamma_scale, self.film_gamma_scale)
+            beta = beta.clamp(-self.film_beta_scale, self.film_beta_scale)
+        return gamma, beta
 
     def forward(
         self,
@@ -200,6 +235,7 @@ class FiLMMLPBlock(nn.Module):
         film_parameters: tuple[torch.Tensor, torch.Tensor] | None,
         control_set: torch.Tensor | None,
     ) -> torch.Tensor:
+        residual = hidden
         gamma: torch.Tensor
         beta: torch.Tensor
         if film_parameters is None:
@@ -207,6 +243,7 @@ class FiLMMLPBlock(nn.Module):
             beta = torch.zeros_like(hidden)
         else:
             gamma, beta = film_parameters
+            gamma, beta = self._bound_film(gamma, beta)
         hidden = self.fc1(hidden)
         hidden = self.norm1(hidden)
         hidden = hidden * (1 + gamma) + beta
@@ -216,7 +253,7 @@ class FiLMMLPBlock(nn.Module):
         hidden = self.control_attention(hidden, control_set)
         hidden = self.dropout(hidden)
         hidden = F.silu(self.norm2(self.fc2(hidden)))
-        return hidden
+        return hidden + self.block_residual_scale * residual
 
 
 class BaseConditionedMLP(nn.Module):
@@ -257,6 +294,7 @@ class AdditiveConditionedMLP(BaseConditionedMLP):
         cell_type_count: int,
         batch_count: int,
         use_batch_embeddings: bool,
+        block_residual_scale: float,
     ) -> None:
         super().__init__(feature_dim, hidden_dim, num_layers, time_embed_dim)
         self.encoder = AdditiveConditionEncoder(
@@ -267,7 +305,10 @@ class AdditiveConditionedMLP(BaseConditionedMLP):
             use_batch_embeddings=use_batch_embeddings,
         )
         self.blocks = nn.ModuleList(
-            [AdditiveMLPBlock(hidden_dim, time_embed_dim, dropout) for _ in range(num_layers)]
+            [
+                AdditiveMLPBlock(hidden_dim, time_embed_dim, dropout, block_residual_scale)
+                for _ in range(num_layers)
+            ]
         )
         self.null_perturbation_index = self.encoder.perturb_len
 
@@ -304,6 +345,10 @@ class FiLMConditionedMLP(BaseConditionedMLP):
         batch_count: int,
         use_batch_embeddings: bool,
         control_attention_heads: int,
+        block_residual_scale: float,
+        film_bound_mode: str,
+        film_gamma_scale: float,
+        film_beta_scale: float,
     ) -> None:
         super().__init__(feature_dim, hidden_dim, num_layers, time_embed_dim)
         self.encoder = FiLMConditionEncoder(
@@ -315,7 +360,16 @@ class FiLMConditionedMLP(BaseConditionedMLP):
         )
         self.blocks = nn.ModuleList(
             [
-                FiLMMLPBlock(hidden_dim, time_embed_dim, dropout, control_attention_heads)
+                FiLMMLPBlock(
+                    hidden_dim,
+                    time_embed_dim,
+                    dropout,
+                    control_attention_heads,
+                    block_residual_scale,
+                    film_bound_mode,
+                    film_gamma_scale,
+                    film_beta_scale,
+                )
                 for _ in range(num_layers)
             ]
         )
@@ -375,6 +429,7 @@ def _build_additive(model_config: dict, dataset_artifacts: dict) -> nn.Module:
         cell_type_count=dataset_artifacts["condition_sizes"]["cell_type"],
         batch_count=dataset_artifacts["condition_sizes"]["batch"],
         use_batch_embeddings=model_config["use_batch_embeddings"],
+        block_residual_scale=model_config["block_residual_scale"],
     )
 
 
@@ -391,4 +446,8 @@ def _build_film(model_config: dict, dataset_artifacts: dict) -> nn.Module:
         batch_count=dataset_artifacts["condition_sizes"]["batch"],
         use_batch_embeddings=model_config["use_batch_embeddings"],
         control_attention_heads=model_config["control_attention_heads"],
+        block_residual_scale=float(model_config.get("block_residual_scale", 0.0)),
+        film_bound_mode=str(model_config.get("film_bound_mode", "none")),
+        film_gamma_scale=float(model_config.get("film_gamma_scale", 1.0)),
+        film_beta_scale=float(model_config.get("film_beta_scale", 1.0)),
     )

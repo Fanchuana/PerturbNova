@@ -63,6 +63,10 @@ DEFAULT_TRAIN_CONFIG: dict[str, Any] = {
         "use_batch_embeddings": False,
         "control_attention_heads": 4,
         "perturbation_dropout": 0.15,
+        "block_residual_scale": 0.0,
+        "film_bound_mode": "none",
+        "film_gamma_scale": 1.0,
+        "film_beta_scale": 1.0,
     },
     "diffusion": {
         "steps": 1000,
