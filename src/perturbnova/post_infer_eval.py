@@ -158,7 +158,11 @@ def run_cell_eval_from_config(
 ) -> tuple[Path, Path]:
     config = load_infer_config(config_path)
     if output_dir_override:
-        config["experiment"]["output_dir"] = output_dir_override
+        output_dir = Path(output_dir_override)
+        config["experiment"]["output_dir"] = str(output_dir)
+        config["output"]["prediction_path"] = str(output_dir / "predictions.h5ad")
+        config["output"]["real_copy_path"] = str(output_dir / "cell_eval_real.h5ad")
+        config["cell_eval"]["outdir"] = str(output_dir / "cell_eval")
     if not config["cell_eval"]["enabled"]:
         raise ValueError("cell_eval is disabled in this inference config.")
 

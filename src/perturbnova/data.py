@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
+from .autoencoder import autoencoder_feature_dim
 from .config import load_dataset_config
 from .utils.distributed import DistributedContext
 
@@ -150,14 +151,14 @@ def _encode_values(
     fallback_label: str = "",
 ) -> np.ndarray:
     encoded = []
-    default_value = default_label or next(iter(vocab))
+    default_value = default_label
     for value in values:
         value = str(value)
         if value in vocab:
             encoded.append(vocab[value])
         elif fallback_label and fallback_label in vocab:
             encoded.append(vocab[fallback_label])
-        elif default_value in vocab:
+        elif default_value and default_value in vocab:
             encoded.append(vocab[default_value])
         else:
             raise KeyError(f"Unknown {field_name} label: {value}")
@@ -415,10 +416,12 @@ def build_training_data_module(
         shuffle=True,
     )
 
+    feature_dim = autoencoder_feature_dim(train_config["vae"], raw_feature_dim=int(train_features.shape[1]))
+
     artifacts = StateDataArtifacts(
-        feature_dim=int(train_config["vae"]["latent_dim"] if train_config["vae"]["enabled"] else train_features.shape[1]),
+        feature_dim=feature_dim,
         raw_feature_dim=int(train_features.shape[1]),
-        output_dim=int(train_config["vae"]["latent_dim"] if train_config["vae"]["enabled"] else train_features.shape[1]),
+        output_dim=feature_dim,
         obs_keys=obs_keys,
         feature_space=dataset_config["feature_space"],
         use_hvg=dataset_config["use_hvg"],
@@ -495,11 +498,13 @@ def build_inference_loader(
     else:
         reference_adata = target_adata
 
+    has_perturbation_column = obs_keys["perturbation"] in target_adata.obs
     target_perturbation_names = (
         target_adata.obs[obs_keys["perturbation"]].astype(str).values
-        if obs_keys["perturbation"] in target_adata.obs
+        if has_perturbation_column
         else np.asarray([defaults["perturbation"] or artifacts.control_label] * target_adata.n_obs)
     )
+    allow_unknown_perturbations = bool(input_config.get("allow_unknown_perturbations", False))
     target_batch_names = (
         target_adata.obs[obs_keys["batch"]].astype(str).values
         if obs_keys["batch"] in target_adata.obs
@@ -523,8 +528,12 @@ def build_inference_loader(
             target_perturbation_names,
             artifacts.vocab["perturbation"],
             field_name="perturbation",
-            default_label=defaults["perturbation"],
-            fallback_label=infer_config["control"]["label"] or artifacts.control_label,
+            default_label=defaults["perturbation"] if not has_perturbation_column else "",
+            fallback_label=(
+                infer_config["control"]["label"] or artifacts.control_label
+                if allow_unknown_perturbations
+                else ""
+            ),
         ),
         batch_ids=_encode_values(
             target_batch_names,

@@ -249,6 +249,26 @@ class InferConfigTests(unittest.TestCase):
 
             self.assertEqual(config["diffusion"]["timestep_respacing"], "ddim50")
 
+    def test_inference_unknown_perturbations_default_to_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "infer.toml").write_text(
+                "\n".join(
+                    [
+                        "[checkpoint]",
+                        "path = \"/tmp/ckpt.pt\"",
+                        "",
+                        "[input]",
+                        "data_path = \"/tmp/data.h5ad\"",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_infer_config(root / "infer.toml")
+
+            self.assertFalse(config["input"]["allow_unknown_perturbations"])
+
     def test_base_infer_relative_dataset_config_path_resolves_from_base_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

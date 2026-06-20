@@ -298,6 +298,108 @@ class InferenceSplitTests(unittest.TestCase):
             self.assertEqual(len(loader.dataset), 2)
             self.assertIsNone(sampler)
 
+    def test_inference_unknown_perturbation_raises_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            data_path = root / "full_dataset.h5ad"
+            ad.settings.allow_write_nullable_strings = True
+
+            adata = ad.AnnData(X=np.asarray([[0.0, 0.1]], dtype=np.float32))
+            adata.obs["gene"] = ["unseen_gene"]
+            adata.obs["gem_group"] = ["batch1"]
+            adata.obs["cell_line"] = ["hepg2"]
+            adata.write_h5ad(data_path)
+
+            artifacts = StateDataArtifacts(
+                feature_dim=2,
+                raw_feature_dim=2,
+                output_dim=2,
+                obs_keys={
+                    "perturbation": "gene",
+                    "batch": "gem_group",
+                    "cell_type": "cell_line",
+                },
+                feature_space={"source": "X", "key": ""},
+                use_hvg=False,
+                hvg_key="highly_variable",
+                condition_sizes={
+                    "perturbation": 1,
+                    "batch": 1,
+                    "cell_type": 1,
+                },
+                vocab={
+                    "perturbation": {"ctrl": 0},
+                    "batch": {"batch1": 0},
+                    "cell_type": {"hepg2": 0},
+                },
+                default_labels={
+                    "perturbation": "ctrl",
+                    "batch": "batch1",
+                    "cell_type": "hepg2",
+                },
+                control_label="ctrl",
+            )
+            infer_config = {
+                "input": {
+                    "data_path": str(data_path),
+                    "reference_data_path": "",
+                    "allow_unknown_perturbations": False,
+                    "split": {
+                        "subset": "",
+                        "dataset_config_path": "",
+                    },
+                    "obs_keys": {
+                        "perturbation": "",
+                        "batch": "",
+                        "cell_type": "",
+                    },
+                    "defaults": {
+                        "perturbation": "",
+                        "batch": "",
+                        "cell_type": "",
+                    },
+                },
+                "control": {
+                    "enabled": False,
+                    "label": "ctrl",
+                    "samples_per_query": 4,
+                },
+                "sampling": {
+                    "batch_size": 8,
+                    "num_workers": 0,
+                    "pin_memory": False,
+                    "persistent_workers": False,
+                },
+            }
+            train_dataset_config = {
+                "data_path": str(data_path),
+                "use_hvg": False,
+                "hvg_key": "highly_variable",
+                "feature_space": {"source": "X", "key": ""},
+                "obs_keys": {
+                    "perturbation": "gene",
+                    "batch": "gem_group",
+                    "cell_type": "cell_line",
+                },
+                "control": {"label": "ctrl"},
+                "split": {"mode": "none"},
+            }
+            context = DistributedContext(
+                rank=0,
+                world_size=1,
+                local_rank=0,
+                device=torch.device("cpu"),
+                backend="gloo",
+            )
+
+            with self.assertRaisesRegex(KeyError, "Unknown perturbation label: unseen_gene"):
+                build_inference_loader(
+                    infer_config=infer_config,
+                    train_dataset_config=train_dataset_config,
+                    artifacts=artifacts,
+                    distributed_context=context,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

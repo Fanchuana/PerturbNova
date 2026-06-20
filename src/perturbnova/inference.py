@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
+from .autoencoder import build_autoencoder_adapter
 from .core import build_diffusion
 from .data import StateDataArtifacts, build_inference_loader
 from .models import build_model
@@ -19,7 +20,6 @@ from .utils.checkpoint import (
     select_state_dict_for_inference,
 )
 from .utils.distributed import DistributedContext
-from .vae import build_vae_module, decode_array_with_vae, encode_with_vae
 
 
 class DecoderAdapter:
@@ -85,11 +85,13 @@ class DiffusionInferenceRunner:
         objective_config = self.train_config.get("objective", {})
         self.control_usage = str(objective_config.get("control_usage", "input_only"))
         self.use_control_input = self.control_usage in {"input_only", "input_and_loss"}
-        self.vae = build_vae_module(
-            self.train_config.get("vae", {"enabled": False}),
+        vae_config = self.train_config.get("vae", {"enabled": False})
+        self.autoencoder = build_autoencoder_adapter(
+            vae_config,
             input_dim=self.artifacts.raw_feature_dim,
             device=self.context.device,
         )
+        self.vae = self.autoencoder.module
         if self.vae is not None and self.payload.get("vae") is not None:
             self.vae.load_state_dict(self.payload["vae"])
             self.vae.eval()
@@ -116,6 +118,9 @@ class DiffusionInferenceRunner:
             export_json(self.output_dir / "infer_config_snapshot.json", self.config)
             self.logger.log_run_header()
             self._log_inference_context()
+
+    def _uses_evoformer_pretrain_embedding(self) -> bool:
+        return self.autoencoder.uses_evoformer_pretrain_embedding
 
     def _resolve_prediction_path(self) -> Path:
         output_config = self.config["output"]
@@ -228,8 +233,7 @@ class DiffusionInferenceRunner:
         latent_predictions = latent_predictions.astype(np.float32)
         vae_predictions = latent_predictions
         if self.vae is not None and self.train_config.get("vae", {}).get("decode_predictions", True):
-            vae_predictions = decode_array_with_vae(
-                self.vae,
+            vae_predictions = self.autoencoder.decode_array(
                 latent_predictions,
                 device=self.context.device,
                 batch_size=int(self.train_config.get("vae", {}).get("batch_size", 512)),
@@ -319,9 +323,9 @@ class DiffusionInferenceRunner:
                     )
                     if self.vae is not None:
                         batch_size, control_count, feature_dim = model_kwargs["control_set"].shape
-                        model_kwargs["control_set"] = encode_with_vae(
-                            self.vae,
-                            model_kwargs["control_set"].reshape(-1, feature_dim),
+                        control_flat = model_kwargs["control_set"].reshape(-1, feature_dim)
+                        model_kwargs["control_set"] = self.autoencoder.encode(
+                            control_flat,
                         ).reshape(batch_size, control_count, -1)
                 if not self.use_control_input:
                     model_kwargs["control_set"] = None

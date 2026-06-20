@@ -13,13 +13,13 @@ import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import AdamW
 
+from .autoencoder import build_autoencoder_adapter
 from .core import LossAwareSampler, build_diffusion, create_named_schedule_sampler
 from .data import StatePerturbationDataModule, build_training_data_module
 from .models import build_model
 from .utils import ExperimentLogger, barrier, export_json, unwrap_model
 from .utils.checkpoint import _ema_key, extract_state_dict, load_training_state, save_checkpoint
 from .utils.distributed import DistributedContext
-from .vae import build_vae_module, decode_with_vae, encode_with_vae
 
 
 def _move_batch_to_device(batch: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
@@ -115,6 +115,7 @@ class DiffusionTrainer:
         self.training_mode = config["training"]["mode"]
         self.output_dir = Path(config["experiment"]["output_dir"])
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
         self.logger = ExperimentLogger(
             self.output_dir,
             enabled=distributed_context.is_main_process,
@@ -127,11 +128,13 @@ class DiffusionTrainer:
             world_size=distributed_context.world_size,
         )
         self.data_module: StatePerturbationDataModule = build_training_data_module(config, distributed_context)
-        self.vae = build_vae_module(
+
+        self.autoencoder = build_autoencoder_adapter(
             config["vae"],
             input_dim=self.data_module.artifacts.raw_feature_dim,
             device=self.context.device,
         )
+        self.vae = self.autoencoder.module
         self.use_vae = self.vae is not None
         self.vae_frozen = (not self.use_vae) or bool(config["vae"]["freeze"])
         self.reconstruction_loss_weight = float(config["vae"]["reconstruction_loss_weight"])
@@ -325,13 +328,16 @@ class DiffusionTrainer:
             condition["perturbation"][drop_mask] = self.null_perturbation_index
         return condition
 
+    def _uses_evoformer_pretrain_embedding(self) -> bool:
+        return self.autoencoder.uses_evoformer_pretrain_embedding
+
     def _encode_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         if not self.use_vae:
             return tensor
         if self.vae_frozen:
             with torch.no_grad():
-                return encode_with_vae(self._vae_module(), tensor)
-        return encode_with_vae(self._vae_module(), tensor)
+                return self.autoencoder.encode(tensor, module=self._vae_module())
+        return self.autoencoder.encode(tensor, module=self._vae_module())
 
     def _encode_control_set(self, control_set: torch.Tensor | None) -> torch.Tensor | None:
         if control_set is None:
@@ -343,7 +349,7 @@ class DiffusionTrainer:
         return encoded.reshape(batch_size, control_count, -1)
 
     def _decode_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
-        return decode_with_vae(self._vae_module(), tensor)
+        return self.autoencoder.decode(tensor, module=self._vae_module())
 
     def _update_ema(self) -> None:
         current_state = unwrap_model(self.ddp_model).state_dict()
@@ -444,6 +450,7 @@ class DiffusionTrainer:
                 "checkpoint": self.config["vae"].get("checkpoint_path", ""),
                 "pretrained_state_dir": self.config["vae"].get("pretrained_state_dir", ""),
                 "latent_dim": self.config["vae"].get("latent_dim", ""),
+                "representation": self.config["vae"].get("representation", "latent"),
                 "recon_weight": self.reconstruction_loss_weight,
                 "decode_predictions": self.config["vae"].get("decode_predictions", True),
             },

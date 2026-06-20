@@ -120,6 +120,23 @@ DEFAULT_TRAIN_CONFIG: dict[str, Any] = {
         "reconstruction_loss_weight": 0.0,
         "decode_predictions": True,
         "batch_size": 512,
+        "type": "mlp",  # "mlp" or "evoformer"
+        "representation": "latent",  # "latent" or Evoformer-only "pretrain_embedding"
+    },
+    "evoformer_ae": {
+        "enabled": False,
+        "checkpoint_path": "",
+        "latent_dim": 128,
+        "freeze": True,
+        "n_gene_total": 20074,
+        "n_gene": 100,
+        "n_gene_feat": 32,
+        "n_pair_feat": 16,
+        "n_embed": 1280,
+        "num_evoformer_blocks": 6,
+        "reconstruction_loss_weight": 0.0,
+        "decode_predictions": True,
+        "batch_size": 512,
     },
     "evaluation": {
         "enabled": True,
@@ -150,6 +167,7 @@ DEFAULT_INFER_CONFIG: dict[str, Any] = {
     "input": {
         "data_path": "",
         "reference_data_path": "",
+        "allow_unknown_perturbations": False,
         "split": {
             "subset": "",
             "dataset_config_path": "",
